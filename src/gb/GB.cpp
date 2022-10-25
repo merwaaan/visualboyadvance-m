@@ -976,8 +976,26 @@ void gbCompareLYToLYC()
     }
 }
 
+#include <iostream>
+
 void gbWriteMemory(uint16_t address, uint8_t value)
 {
+    if (address == 0xFF70)
+    {
+        std::cout << "received " << int(value) << std::endl;
+
+        // TODO
+
+        /*std::string buffer = "hello.";
+        auto sendResult = send(serverSocket, buffer.c_str(), buffer.length(), 0);
+
+        if (sendResult == SOCKET_ERROR)
+        {
+            std::cout << "failed to send" << std::endl;
+        }*/
+
+        return;
+    }
 
     if (address < 0x8000) {
 #ifndef FINAL_VERSION
@@ -1797,8 +1815,125 @@ void gbWriteMemory(uint16_t address, uint8_t value)
     gbMemory[address] = value;
 }
 
+#include <vector>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <thread>
+#include <mutex>
+
 uint8_t gbReadMemory(uint16_t address)
 {
+    static std::vector<uint8_t> receiveBuffer;
+    static std::mutex receiveThreadMutex;
+
+    static std::thread receiveThread([]() {
+        WSADATA wsa_data;
+        WSAStartup(MAKEWORD(2, 0), &wsa_data);
+
+        SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+        if (serverSocket == INVALID_SOCKET)
+        {
+            std::cout << "failed to create socket" << std::endl;
+        }
+        else
+        {
+            SOCKADDR_IN addr;
+            InetPton(AF_INET, "127.0.0.1", &addr.sin_addr.s_addr);
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons(3333);
+
+            auto connectResult = connect(serverSocket, reinterpret_cast<SOCKADDR*>(&addr), sizeof(addr));
+
+            if (connectResult == SOCKET_ERROR)
+            {
+                std::cout << "failed to connect" << std::endl;
+            }
+            else
+            {
+                std::cout << "connected" << std::endl;
+
+                // Receive data
+
+                const int bufferLen = 100;
+                char buffer[bufferLen];
+
+                while (true)
+                {
+                    auto receivedBytes = recv(serverSocket, buffer, bufferLen, 0);
+
+                    if (receivedBytes == SOCKET_ERROR)
+                    {
+                        std::cout << "failed to receive" << std::endl;
+                    }
+                    else if (receivedBytes > 0)
+                    {
+                        std::cout << "received " << std::endl;
+
+                        receiveThreadMutex.lock();
+
+                        for (int i = 0; i < receivedBytes; ++i)
+                        {
+                            std::cout << int(buffer[i]) << " ";
+
+                            receiveBuffer.push_back(buffer[i]);
+                        }
+
+                        receiveThreadMutex.unlock();
+
+                        std::cout << std::endl;
+                    }
+
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
+            }
+        }
+    });
+    
+
+    if (address == 0xFF70)
+    {
+#if 0
+        static std::vector<uint8_t> commandData = { 0x45, 1, 2, 10, 20, 5 };
+        static int commandDataIndex = 0;
+
+        auto value = commandData.at(commandDataIndex++);
+
+        if (commandDataIndex == commandData.size())
+        {
+            commandDataIndex = 0;
+
+            commandData.at(3)++;
+        }
+
+        return value;
+#endif
+
+        // Fetch data from the buffer or wait
+
+        while (true)
+        {
+            //std::lock<std::mutex> guard(receiveThreadMutex);
+            receiveThreadMutex.lock();
+
+            if (!receiveBuffer.empty())
+            {
+                auto value = receiveBuffer.front();
+                receiveBuffer.erase(receiveBuffer.begin());
+                receiveThreadMutex.unlock();
+
+                std::cout << "transfer " << int(value) << std::endl;
+
+                return value;
+            }
+            else
+            {
+                receiveThreadMutex.unlock();
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
+    }
+
     if (gbCheatMap[address])
         return gbCheatRead(address);
 
