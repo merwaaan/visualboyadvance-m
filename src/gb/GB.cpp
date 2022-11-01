@@ -978,21 +978,15 @@ void gbCompareLYToLYC()
 
 #include <iostream>
 
+static uint8_t last_input = 0;
+
 void gbWriteMemory(uint16_t address, uint8_t value)
 {
     if (address == 0xFF70)
     {
-        std::cout << "received " << int(value) << std::endl;
+        //std::cout << "received " << int(value) << std::endl;
 
-        // TODO
-
-        /*std::string buffer = "hello.";
-        auto sendResult = send(serverSocket, buffer.c_str(), buffer.length(), 0);
-
-        if (sendResult == SOCKET_ERROR)
-        {
-            std::cout << "failed to send" << std::endl;
-        }*/
+        last_input = value;
 
         return;
     }
@@ -1821,74 +1815,88 @@ void gbWriteMemory(uint16_t address, uint8_t value)
 #include <thread>
 #include <mutex>
 
-uint8_t gbReadMemory(uint16_t address)
-{
-    static std::vector<uint8_t> receiveBuffer;
-    static std::mutex receiveThreadMutex;
+static std::vector<uint8_t> receiveBuffer;
+static std::mutex receiveThreadMutex;
 
-    static std::thread receiveThread([]() {
-        WSADATA wsa_data;
-        WSAStartup(MAKEWORD(2, 0), &wsa_data);
+static std::thread receiveThread([]() {
+    WSADATA wsa_data;
+    WSAStartup(MAKEWORD(2, 0), &wsa_data);
 
-        SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 
-        if (serverSocket == INVALID_SOCKET)
+    if (serverSocket == INVALID_SOCKET)
+    {
+        std::cout << "failed to create socket" << std::endl;
+    }
+    else
+    {
+        SOCKADDR_IN addr;
+        InetPton(AF_INET, "127.0.0.1", &addr.sin_addr.s_addr);
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(3333);
+
+        auto connectResult = connect(serverSocket, reinterpret_cast<SOCKADDR*>(&addr), sizeof(addr));
+
+        if (connectResult == SOCKET_ERROR)
         {
-            std::cout << "failed to create socket" << std::endl;
+            std::cout << "failed to connect" << std::endl;
         }
         else
         {
-            SOCKADDR_IN addr;
-            InetPton(AF_INET, "127.0.0.1", &addr.sin_addr.s_addr);
-            addr.sin_family = AF_INET;
-            addr.sin_port = htons(3333);
+            std::cout << "connected" << std::endl;
 
-            auto connectResult = connect(serverSocket, reinterpret_cast<SOCKADDR*>(&addr), sizeof(addr));
+            // Receive data
 
-            if (connectResult == SOCKET_ERROR)
+            const int bufferLen = 100;
+            char buffer[bufferLen];
+
+            while (true)
             {
-                std::cout << "failed to connect" << std::endl;
-            }
-            else
-            {
-                std::cout << "connected" << std::endl;
+                // Receive
 
-                // Receive data
+                auto receivedBytes = recv(serverSocket, buffer, bufferLen, 0);
 
-                const int bufferLen = 100;
-                char buffer[bufferLen];
-
-                while (true)
+                if (receivedBytes == SOCKET_ERROR)
                 {
-                    auto receivedBytes = recv(serverSocket, buffer, bufferLen, 0);
-
-                    if (receivedBytes == SOCKET_ERROR)
-                    {
-                        std::cout << "failed to receive" << std::endl;
-                    }
-                    else if (receivedBytes > 0)
-                    {
-                        std::cout << "received " << std::endl;
-
-                        receiveThreadMutex.lock();
-
-                        for (int i = 0; i < receivedBytes; ++i)
-                        {
-                            std::cout << int(buffer[i]) << " ";
-
-                            receiveBuffer.push_back(buffer[i]);
-                        }
-
-                        receiveThreadMutex.unlock();
-
-                        std::cout << std::endl;
-                    }
-
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    std::cout << "failed to receive" << std::endl;
                 }
+                else if (receivedBytes > 0)
+                {
+                    //std::cout << "received " << std::endl;
+
+                    receiveThreadMutex.lock();
+
+                    for (int i = 0; i < receivedBytes; ++i)
+                    {
+                        //std::cout << int(buffer[i]) << " ";
+
+                        receiveBuffer.push_back(buffer[i]);
+                    }
+
+                    receiveThreadMutex.unlock();
+
+                    //std::cout << std::endl;
+                }
+
+                // Send
+
+                auto sendResult = send(serverSocket, (char*)(&last_input), 1, 0);
+
+                if (sendResult == SOCKET_ERROR)
+                {
+                    std::cout << "failed to send" << std::endl;
+                }
+
+                // Throttle
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
         }
-    });
+    }
+});
+
+uint8_t gbReadMemory(uint16_t address)
+{
     
 
     if (address == 0xFF70)
@@ -1922,7 +1930,7 @@ uint8_t gbReadMemory(uint16_t address)
                 receiveBuffer.erase(receiveBuffer.begin());
                 receiveThreadMutex.unlock();
 
-                std::cout << "transfer " << int(value) << std::endl;
+                //std::cout << "transfer " << int(value) << std::endl;
 
                 return value;
             }
